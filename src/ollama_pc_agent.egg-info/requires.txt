@@ -1,0 +1,4 @@
+beautifulsoup4<5,>=4.12
+httpx<1,>=0.27
+psutil<8,>=5.9
+rich<15,>=13.7

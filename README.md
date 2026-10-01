@@ -1,0 +1,146 @@
+# Ollama PC Agent 0.2
+
+Agente local en Python con router de modelos por capacidades, contexto dinámico,
+escalado progresivo, web, terminal, archivos, memoria y workflows aprendidos.
+
+## Inicio
+
+```bat
+cd C:\Users\luisa\OneDrive\Escritorio\agent-analisis
+install-agent.cmd
+run-agent.cmd
+```
+
+Al iniciar siempre pregunta qué hacer si el intento elegido falla (`never`, `ask` o
+`auto`) y después permite elegir `0. Automático` o fijar un modelo. La política se guarda
+en `config.json` como opción predeterminada para Enter y para ejecuciones no interactivas,
+pero el modo interactivo vuelve a preguntarla en cada inicio. También puede cambiarse con
+`/escalation`.
+
+## Cómo decide el router
+
+El registro se reconstruye con `/api/show` de Ollama y conserva resultados medidos. Para
+cada modelo registra contexto máximo, tamaño, parámetros, cuantización, KV cache estimado,
+tools, visión, reasoning, modalidades, especialización de código, velocidad observada,
+RAM/VRAM aproximada, backend, localidad y capacidades verificadas.
+
+Antes de cada tarea detecta visión, herramientas, web, programación, razonamiento, salida
+estructurada, privacidad, dificultad y contexto. Luego descarta modelos incompatibles y
+puntúa los restantes por capacidad, velocidad, memoria, coste y perfil. No usa solamente
+el número de parámetros.
+
+Se consideran fallos objetivos: OOM, contexto insuficiente, modalidad o tools ausentes,
+respuesta vacía, JSON inválido, Python con sintaxis inválida, errores repetidos de una
+herramienta y agotamiento del ciclo de acciones. Un reintento OOM reduce el contexto y
+descarga el modelo; un escalado no repite el mismo modelo.
+
+## Contexto dinámico
+
+El máximo declarado por el modelo nunca se supera. El contexto efectivo crece en potencias
+de dos según el prompt, resultados de herramientas y salida reservada. También se limita
+usando RAM/VRAM disponible, tamaño del modelo y bytes aproximados del KV cache. Pedidos de
+código o informes largos reservan más salida.
+
+Antes de descartar historial se preservan instrucciones, decisiones, errores, código y
+turnos recientes; el resto se deduplica y resume por categorías. `/context` muestra la
+última medición. `context_meter: false` oculta las mediciones automáticas.
+
+## Comandos
+
+```text
+/model auto
+/model NOMBRE
+/model once NOMBRE
+/models
+/profile balanced
+/escalation ask
+/context
+/router
+/resources
+/image imagen.png | Describe la interfaz
+/debug on
+/learned
+/remember TEXTO
+/export
+/help
+```
+
+Perfiles: `fast`, `balanced`, `max_quality`, `local_only`, `low_vram` y `max_privacy`.
+Privacidad máxima bloquea Internet y modelos remotos; solo local bloquea remotos; bajo
+VRAM limita el contexto efectivo; rápido limita escalados; máxima calidad pondera más la
+capacidad que la latencia.
+
+## Permisos y autonomía
+
+Todas las herramientas consultan una sola política con valores `AUTO`, `NOTIFY`, `CONFIRM`
+o `BLOCK`. Por defecto, leer/escribir archivos del workspace, crear carpetas, buscar en web
+y ejecutar tests son automáticos. Mover archivos notifica. Borrados, comandos destructivos
+y cambios del sistema piden confirmación; patrones como descargar y pasar directamente a
+`Invoke-Expression` se bloquean.
+
+Las rutas no pueden salir del workspace. Las páginas no pueden redirigir a localhost o IP
+privadas. Cambia cualquier decisión en `permission_policy` dentro de `config.json`.
+
+## Configuración por modelo
+
+`model_overrides` permite `context`, `temperature`, `top_p`, `top_k`,
+`max_output_tokens`, `gpu_layers`, `threads`, `batch_size`, `reasoning_effort` y
+`backend_options`. `null` o ausencia significa automático. Consulta
+`config.example.json` para un ejemplo completo.
+
+Una cadena explícita puede definirse así:
+
+```json
+"escalation_chain": [
+  "qwen3.5:9b",
+  "orcarouter/Qwen3.8-27B-Uncensored:qwen-code",
+  "mi-modelo-remoto"
+]
+```
+
+## Modelos remotos y privacidad
+
+Los remotos están bloqueados por defecto. Se admite una API HTTPS compatible con
+`/v1/chat/completions`; la clave sólo se lee de una variable de entorno y nunca se guarda.
+
+```json
+"remote_enabled": true,
+"remote_allow_private_data": false,
+"remote_confirm_before_send": true,
+"remote_models": [
+  {
+    "name": "mi-modelo-remoto",
+    "model": "modelo-del-proveedor",
+    "base_url": "https://proveedor.example/v1",
+    "api_key_env": "MI_API_KEY",
+    "context_max": 128000,
+    "capabilities": ["completion", "tools", "reasoning", "structured_output"],
+    "modalities": ["text"],
+    "programming_score": 0.8,
+    "cost_input_per_million": 0,
+    "cost_output_per_million": 0
+  }
+]
+```
+
+Aunque el escalado sea automático, `remote_confirm_before_send` puede exigir permiso por
+envío. Si el contexto parece contener secretos y `remote_allow_private_data` es falso, se
+bloquea. El perfil `local_only` excluye todos los remotos.
+
+## Aprendizaje procedural
+
+Cada tarea registra localmente la secuencia de herramientas. Tras tres ejecuciones exitosas
+con la misma estructura, crea un workflow declarativo parametrizable en
+`.agent-data/learned_tools/tools_registry.json`. Los pasos se ejecutan otra vez mediante las
+herramientas nativas, por lo que heredan sus permisos. Tres fallos de reutilización desactivan
+el workflow. No se reescribe silenciosamente el núcleo del agente ni se ejecuta código opaco
+para evadir la política.
+
+Los logs debug están en `.agent-data/router-debug.jsonl`; el registro de modelos está en
+`.agent-data/model_registry.json` y la memoria en `.agent-data/memory.sqlite3`.
+
+## Pruebas
+
+```powershell
+.venv\Scripts\python.exe -m pytest -q
+```

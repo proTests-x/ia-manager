@@ -1,0 +1,2 @@
+[console_scripts]
+ollama-agent = pc_agent.cli:main
